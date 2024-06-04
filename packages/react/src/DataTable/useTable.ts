@@ -1,4 +1,4 @@
-import {useState} from 'react'
+import {useMemo, useState} from 'react'
 import type {Column} from './column'
 import type {UniqueRow} from './row'
 import {DEFAULT_SORT_DIRECTION, SortDirection, transition, strategies} from './sorting'
@@ -48,10 +48,8 @@ export function useTable<Data extends UniqueRow>({
   initialSortColumn,
   initialSortDirection,
 }: TableConfig<Data>): Table<Data> {
-  const [rowOrder, setRowOrder] = useState(data)
-  const [prevData, setPrevData] = useState<typeof data | null>(null)
   const [prevColumns, setPrevColumns] = useState(columns)
-  const [sortByColumn, setSortByColumn] = useState<ColumnSortState>(() => {
+  const [sortState, setSortState] = useState<ColumnSortState>(() => {
     return getInitialSortState(columns, initialSortColumn, initialSortDirection)
   })
   const {gridTemplateColumns} = useTableLayout(columns)
@@ -60,93 +58,73 @@ export function useTable<Data extends UniqueRow>({
   // longer provided
   if (columns !== prevColumns) {
     setPrevColumns(columns)
-    if (sortByColumn) {
+    if (sortState) {
       const column = columns.find(column => {
         const id = column.id ?? column.field
-        return sortByColumn.id === id
+        return sortState.id === id
       })
       if (!column) {
-        setSortByColumn(null)
+        setSortState(null)
       }
     }
   }
 
-  const headers = columns.map(column => {
-    const id = column.id ?? column.field
-    if (id === undefined) {
-      throw new Error(`Expected either an \`id\` or \`field\` to be defined for a Column`)
-    }
-
-    const sortable = column.sortBy !== undefined && column.sortBy !== false
-    return {
-      id,
-      column,
-      isSortable() {
-        return sortable
-      },
-      getSortDirection() {
-        if (sortByColumn && sortByColumn.id === id) {
-          return sortByColumn.direction
+  const headers = useMemo(
+    () =>
+      columns.map(column => {
+        const id = column.id ?? column.field
+        if (id === undefined) {
+          throw new Error(`Expected either an \`id\` or \`field\` to be defined for a Column`)
         }
-        return SortDirection.NONE
-      },
-    }
-  })
 
-  // Update the row order and apply the current sort column to the incoming data
-  if (data !== prevData) {
-    setPrevData(data)
-    setRowOrder(data)
-    if (sortByColumn) {
-      sortRows(sortByColumn)
-    }
-  }
+        const sortable = column.sortBy !== undefined && column.sortBy !== false
+        return {
+          id,
+          column,
+          isSortable() {
+            return sortable
+          },
+          getSortDirection() {
+            if (sortState && sortState.id === id) {
+              return sortState.direction
+            }
+            return SortDirection.NONE
+          },
+        }
+      }),
+    [columns, sortState],
+  )
 
-  /**
-   * Sort the input row data by the given header
-   */
-  function sortBy(header: Header<Data>) {
-    const sortState = {
-      id: header.id,
-      direction:
-        sortByColumn && sortByColumn.id === header.id ? transition(sortByColumn.direction) : DEFAULT_SORT_DIRECTION,
-    }
-    setSortByColumn(sortState)
-    sortRows(sortState)
-  }
+  const rows = useMemo(() => {
+    let sortedData = data
 
-  /**
-   * Sort the rows of a table with the given column sort state. If the data in the table is sparse,
-   * blank values will be ordered last regardless of the sort direction.
-   */
-  function sortRows(state: Exclude<ColumnSortState, null>) {
-    const header = headers.find(header => {
-      return header.id === state.id
-    })
-    if (!header) {
-      throw new Error(`Unable to find header with id: ${state.id}`)
-    }
+    if (sortState) {
+      const header = headers.find(header => {
+        return header.id === sortState.id
+      })
+      if (!header) {
+        throw new Error(`Unable to find header with id: ${sortState.id}`)
+      }
 
-    if (header.column.sortBy === false || header.column.sortBy === undefined) {
-      throw new Error(`The column for this header is not sortable`)
-    }
+      if (header.column.sortBy === false || header.column.sortBy === undefined) {
+        throw new Error(`The column for this header is not sortable`)
+      }
 
-    const sortMethod =
-      header.column.sortBy === true
-        ? strategies.basic
-        : typeof header.column.sortBy === 'string'
-        ? strategies[header.column.sortBy]
-        : header.column.sortBy
+      const sortMethod =
+        header.column.sortBy === true
+          ? strategies.basic
+          : typeof header.column.sortBy === 'string'
+          ? strategies[header.column.sortBy]
+          : header.column.sortBy
 
-    setRowOrder(rowOrder => {
-      return rowOrder.slice().sort((a, b) => {
+      sortedData = data.slice().sort((a, b) => {
         if (header.column.field === undefined) {
           return 0
         }
 
         // Custom sort functions operate on the row versus the field
         if (typeof header.column.sortBy === 'function') {
-          if (state.direction === SortDirection.ASC) {
+          if (sortState.direction === SortDirection.ASC) {
             // @ts-ignore todo
             return sortMethod(a, b)
           }
@@ -158,7 +136,7 @@ export function useTable<Data extends UniqueRow>({
         const valueB = get(b, header.column.field)
 
         if (valueA && valueB) {
-          if (state.direction === SortDirection.ASC) {
+          if (sortState.direction === SortDirection.ASC) {
             // @ts-ignore todo
             return sortMethod(valueA, valueB)
           }
@@ -175,37 +153,47 @@ export function useTable<Data extends UniqueRow>({
         }
         return 0
       })
-    })
-  }
+    }
+
+    return sortedData.map(row => ({
+      id: `${row.id}`,
+      getValue() {
+        return row
+      },
+      getCells() {
+        return headers.map(header => {
+          return {
+            id: `${row.id}:${header.id}`,
+            column: header.column,
+            rowHeader: header.column.rowHeader ?? false,
+            getValue() {
+              if (header.column.field !== undefined) {
+                return get(row, header.column.field)
+              }
+              throw new Error(`Unable to get value for column header ${header.id}`)
+            },
+          }
+        })
+      },
+    }))
+  }, [data, headers, sortState])
+
+  const actions = useMemo(() => {
+    return {
+      sortBy: (header: Header<Data>) => {
+        const newSortState = {
+          id: header.id,
+          direction: sortState && sortState.id === header.id ? transition(sortState.direction) : DEFAULT_SORT_DIRECTION,
+        }
+        setSortState(newSortState)
+      },
+    }
+  }, [sortState])
 
   return {
     headers,
-    rows: rowOrder.map(row => {
-      return {
-        id: `${row.id}`,
-        getValue() {
-          return row
-        },
-        getCells() {
-          return headers.map(header => {
-            return {
-              id: `${row.id}:${header.id}`,
-              column: header.column,
-              rowHeader: header.column.rowHeader ?? false,
-              getValue() {
-                if (header.column.field !== undefined) {
-                  return get(row, header.column.field)
-                }
-                throw new Error(`Unable to get value for column header ${header.id}`)
-              },
-            }
-          })
-        },
-      }
-    }),
-    actions: {
-      sortBy,
-    },
+    rows,
+    actions,
     gridTemplateColumns,
   }
 }
