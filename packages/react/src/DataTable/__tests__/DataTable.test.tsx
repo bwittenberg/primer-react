@@ -1,6 +1,6 @@
 import userEvent from '@testing-library/user-event'
 import {render, screen, queryAllByRole} from '@testing-library/react'
-import React from 'react'
+import React, {Profiler, type ComponentProps} from 'react'
 import {DataTable, Table} from '../../DataTable'
 import type {Column} from '../column'
 import {createColumnHelper} from '../column'
@@ -857,6 +857,41 @@ describe('DataTable', () => {
       expect(customSortFn).toHaveBeenCalled()
       expect(getCellContentByColumnHeaderName('Value')).toEqual(['3', '2', '1'])
     })
+
+    it('should sort again when data changes', async () => {
+      type Data = {id: string; value: string}
+      const columns: ComponentProps<typeof DataTable<Data>>['columns'] = [
+        {
+          header: 'Value',
+          field: 'value',
+          sortBy: true,
+        },
+      ]
+      const data: ComponentProps<typeof DataTable<Data>>['data'] = [
+        {
+          id: '3',
+          value: '3',
+        },
+        {
+          id: '2',
+          value: '2',
+        },
+      ]
+      const {rerender} = render(
+        <DataTable data={data} columns={columns} initialSortColumn="value" initialSortDirection="ASC" />,
+      )
+
+      rerender(
+        <DataTable
+          data={data.concat({id: '1', value: '1'})}
+          columns={columns}
+          initialSortColumn="value"
+          initialSortDirection="ASC"
+        />,
+      )
+
+      expect(getCellContentByColumnHeaderName('Value')).toEqual(['1', '2', '3'])
+    })
   })
 
   describe('column widths', () => {
@@ -1034,6 +1069,32 @@ describe('DataTable', () => {
       expect(screen.getByRole('table')).toHaveStyle({
         '--grid-template-columns': 'minmax(max-content, 1fr)',
       })
+    })
+  })
+
+  describe('performance tests', () => {
+    it('should not render twice on initial render', () => {
+      type Data = {id: string; value: string}
+      const columns: ComponentProps<typeof DataTable<Data>>['columns'] = [
+        {
+          header: 'Value',
+          field: 'value',
+        },
+      ]
+      const data: ComponentProps<typeof DataTable<Data>>['data'] = [
+        {
+          id: '1',
+          value: 'one',
+        },
+      ]
+      let renderCount = 0
+      render(
+        <Profiler id="DataTable" onRender={() => renderCount++}>
+          <DataTable data={data} columns={columns} />
+        </Profiler>,
+      )
+
+      expect(renderCount).toBe(1)
     })
   })
 })
