@@ -61,12 +61,16 @@ function DataTable<Data extends UniqueRow>({
   initialSortColumn,
   initialSortDirection,
 }: DataTableProps<Data>) {
-  const {headers, rows, actions, gridTemplateColumns} = useTable({
+  const {headers, rows, actions, gridTemplateColumns, willReactThrowOutRenderResult} = useTable({
     data,
     columns,
     initialSortColumn,
     initialSortDirection,
   })
+
+  if (willReactThrowOutRenderResult) {
+    return null
+  }
 
   return (
     <Table

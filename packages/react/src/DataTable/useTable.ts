@@ -47,7 +47,7 @@ export function useTable<Data extends UniqueRow>({
   data,
   initialSortColumn,
   initialSortDirection,
-}: TableConfig<Data>): Table<Data> {
+}: TableConfig<Data>): Table<Data> & {willReactThrowOutRenderResult: boolean} {
   const [rowOrder, setRowOrder] = useState(data)
   const [prevData, setPrevData] = useState<typeof data | null>(null)
   const [prevColumns, setPrevColumns] = useState(columns)
@@ -58,7 +58,8 @@ export function useTable<Data extends UniqueRow>({
 
   // Reset the `sortByColumn` state if the columns change and that column is no
   // longer provided
-  if (columns !== prevColumns) {
+  const haveColumnsChanged = columns !== prevColumns
+  if (haveColumnsChanged) {
     setPrevColumns(columns)
     if (sortByColumn) {
       const column = columns.find(column => {
@@ -94,7 +95,8 @@ export function useTable<Data extends UniqueRow>({
   })
 
   // Update the row order and apply the current sort column to the incoming data
-  if (data !== prevData) {
+  const hasDataChanged = data !== prevData
+  if (hasDataChanged) {
     setPrevData(data)
     setRowOrder(data)
     if (sortByColumn) {
@@ -207,6 +209,7 @@ export function useTable<Data extends UniqueRow>({
       sortBy,
     },
     gridTemplateColumns,
+    willReactThrowOutRenderResult: hasDataChanged || haveColumnsChanged,
   }
 }
 
